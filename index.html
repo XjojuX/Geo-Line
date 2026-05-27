@@ -9,14 +9,18 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://unpkg.com/topojson-client@3"></script>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   html,body,#root{height:100%;width:100%}
   body{ 
-    background:#f8fafc; /* Sehr helles Grau/Blau für den Hintergrund */
-    color:#1e293b; /* Dunkles Schiefergrau für Text */
+    background:#f8fafc; 
+    color:#1e293b; 
     font-family:'Inter', sans-serif; 
     overflow-x:hidden; 
   }
@@ -27,13 +31,652 @@
   
   .map-country { transition: fill 0.3s, stroke 0.3s; }
   
-  /* Minimalistische Card-Schatten */
   .material-card {
     background: #ffffff;
     border-radius: 12px;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
     border: 1px solid #e2e8f0;
   }
+  .input-focus:focus-within {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo } = React;
+
+// ═══════════════════════════════════════════════════════════
+// FIREBASE SETUP
+// ═══════════════════════════════════════════════════════════
+/* HIER DEINE FIREBASE CONFIG EINTRAGEN */
+const firebaseConfig = {
+  apiKey: "AIzaSyB2nmoTVnX8F9NdzdnGS3CxsNJB1R6zQLs",
+  authDomain: "geoline-4e827.firebaseapp.com",
+  projectId: "geoline-4e827",
+  storageBucket: "geoline-4e827.firebasestorage.app",
+  messagingSenderId: "57714217295",
+  appId: "1:57714217295:web:fd7bfaa053df866b46b53a"
+};
+
+// Initialisiere Firebase nur, wenn es noch nicht existiert
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+const db = firebase.firestore();
+
+// ═══════════════════════════════════════════════════════════
+// DATEN & LOGIK
+// ═══════════════════════════════════════════════════════════
+
+const NAME_MAP = {
+  "Portugal": "Portugal", "Spain": "Spanien", "France": "Frankreich",
+  "Germany": "Deutschland", "Netherlands": "Niederlande", "Belgium": "Belgien",
+  "Luxembourg": "Luxemburg", "Switzerland": "Schweiz", "Austria": "Österreich",
+  "Italy": "Italien", "United Kingdom": "Vereinigtes Königreich", "Ireland": "Irland",
+  "Iceland": "Island", "Norway": "Norwegen", "Sweden": "Schweden", "Finland": "Finnland",
+  "Denmark": "Dänemark", "Poland": "Polen", "Czechia": "Tschechien", "Slovakia": "Slowakei",
+  "Hungary": "Ungarn", "Romania": "Rumänien", "Bulgaria": "Bulgarien", "Greece": "Griechenland",
+  "Serbia": "Serbien", "Croatia": "Kroatien", "Slovenia": "Slowenien",
+  "Bosnia and Herz.": "Bosnien", "Montenegro": "Montenegro", "Macedonia": "Nordmazedonien",
+  "Albania": "Albanien", "Kosovo": "Kosovo", "Ukraine": "Ukraine", "Belarus": "Belarus",
+  "Moldova": "Moldau", "Latvia": "Lettland", "Lithuania": "Litauen", "Estonia": "Estland",
+  "Russia": "Russland", "Turkey": "Türkei", "Malta": "Malta", "Cyprus": "Zypern"
+};
+
+const COUNTRY_NAMES = Object.values(NAME_MAP).sort();
+
+const BORDERS = {
+  "Portugal": ["Spanien"],
+  "Spanien": ["Portugal", "Frankreich"],
+  "Frankreich": ["Spanien", "Belgien", "Luxemburg", "Deutschland", "Schweiz", "Italien", "Vereinigtes Königreich"],
+  "Deutschland": ["Dänemark", "Polen", "Tschechien", "Österreich", "Schweiz", "Frankreich", "Luxemburg", "Belgien", "Niederlande"],
+  "Niederlande": ["Deutschland", "Belgien", "Vereinigtes Königreich"],
+  "Belgien": ["Niederlande", "Deutschland", "Luxemburg", "Frankreich", "Vereinigtes Königreich"],
+  "Luxemburg": ["Belgien", "Deutschland", "Frankreich"],
+  "Schweiz": ["Frankreich", "Deutschland", "Österreich", "Italien"],
+  "Österreich": ["Deutschland", "Tschechien", "Slowakei", "Ungarn", "Slowenien", "Italien", "Schweiz"],
+  "Italien": ["Frankreich", "Schweiz", "Österreich", "Slowenien", "Malta", "Griechenland"],
+  "Vereinigtes Königreich": ["Irland", "Frankreich", "Niederlande", "Belgien", "Norwegen", "Island"],
+  "Irland": ["Vereinigtes Königreich"],
+  "Island": ["Norwegen", "Vereinigtes Königreich"],
+  "Norwegen": ["Schweden", "Finnland", "Russland", "Island", "Vereinigtes Königreich", "Dänemark"],
+  "Schweden": ["Norwegen", "Finnland", "Dänemark"],
+  "Finnland": ["Schweden", "Norwegen", "Russland", "Estland"],
+  "Dänemark": ["Deutschland", "Schweden", "Norwegen"],
+  "Polen": ["Deutschland", "Tschechien", "Slowakei", "Ukraine", "Belarus", "Litauen", "Russland"],
+  "Tschechien": ["Deutschland", "Polen", "Slowakei", "Österreich"],
+  "Slowakei": ["Tschechien", "Polen", "Ukraine", "Ungarn", "Österreich"],
+  "Ungarn": ["Österreich", "Slowakei", "Ukraine", "Rumänien", "Serbien", "Kroatien", "Slowenien"],
+  "Rumänien": ["Ungarn", "Ukraine", "Moldau", "Bulgarien", "Serbien"],
+  "Bulgarien": ["Rumänien", "Serbien", "Nordmazedonien", "Griechenland", "Türkei"],
+  "Griechenland": ["Albanien", "Nordmazedonien", "Bulgarien", "Türkei", "Italien", "Zypern"],
+  "Serbien": ["Ungarn", "Rumänien", "Bulgarien", "Nordmazedonien", "Kosovo", "Montenegro", "Bosnien", "Kroatien"],
+  "Kroatien": ["Slowenien", "Ungarn", "Serbien", "Bosnien", "Montenegro"],
+  "Slowenien": ["Italien", "Österreich", "Ungarn", "Kroatien"],
+  "Bosnien": ["Kroatien", "Serbien", "Montenegro"],
+  "Montenegro": ["Kroatien", "Bosnien", "Serbien", "Kosovo", "Albanien"],
+  "Nordmazedonien": ["Kosovo", "Serbien", "Bulgarien", "Griechenland", "Albanien"],
+  "Albanien": ["Montenegro", "Kosovo", "Nordmazedonien", "Griechenland"],
+  "Kosovo": ["Serbien", "Nordmazedonien", "Albanien", "Montenegro"],
+  "Ukraine": ["Polen", "Slowakei", "Ungarn", "Rumänien", "Moldau", "Russland", "Belarus"],
+  "Belarus": ["Lettland", "Litauen", "Polen", "Ukraine", "Russland"],
+  "Moldau": ["Rumänien", "Ukraine"],
+  "Lettland": ["Estland", "Russland", "Belarus", "Litauen"],
+  "Litauen": ["Lettland", "Belarus", "Polen", "Russland"],
+  "Estland": ["Lettland", "Russland", "Finnland"],
+  "Russland": ["Norwegen", "Finnland", "Estland", "Lettland", "Litauen", "Polen", "Belarus", "Ukraine"],
+  "Türkei": ["Bulgarien", "Griechenland", "Zypern"],
+  "Malta": ["Italien"],
+  "Zypern": ["Türkei", "Griechenland"]
+};
+
+const ROUTES = [
+  ["Portugal","Russland"],["Spanien","Ukraine"],["Irland","Türkei"],
+  ["Island","Griechenland"],["Vereinigtes Königreich","Polen"],
+  ["Frankreich","Russland"],["Portugal","Finnland"],["Spanien","Estland"],
+  ["Italien","Norwegen"],["Deutschland","Türkei"],["Belgien","Ukraine"],
+  ["Niederlande","Rumänien"],["Österreich","Island"],["Schweiz","Lettland"],
+];
+
+function findShortestPathLength(start, target) {
+  if (start === target) return 1;
+  let queue = [[start]];
+  let visited = new Set([start]);
+
+  while (queue.length > 0) {
+    let path = queue.shift();
+    let current = path[path.length - 1];
+    if (current === target) return path.length;
+
+    let neighbors = BORDERS[current] || [];
+    for (let n of neighbors) {
+      if (!visited.has(n)) {
+        visited.add(n);
+        queue.push([...path, n]);
+      }
+    }
+  }
+  return 99; 
+}
+
+function calcScore(count, optimal, timeInSeconds, mistakes) {
+  const pathScore = 500 * (optimal / count); 
+  const timeScore = Math.max(0, 500 - (timeInSeconds * 2));
+  const penalty = mistakes * 50;
+  return Math.max(0, Math.floor(pathScore + timeScore - penalty));
+}
+
+const formatTime = (sec) => {
+  const m = Math.floor(sec / 60).toString().padStart(2, '0');
+  const s = (sec % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+};
+
+// ═══════════════════════════════════════════════════════════
+// APP KOMPONENTE
+// ═══════════════════════════════════════════════════════════
+function App() {
+  const [screen, setScreen] = useState('onboard');
+  const [nickname, setNickname] = useState('');
+  const [klasse, setKlasse] = useState('');
+  const [round, setRound] = useState(null);
+  const [guessed, setGuessed] = useState([]); 
+  
+  const [input, setInput] = useState('');
+  const [acList, setAcList] = useState([]);
+  const [acIdx, setAcIdx] = useState(-1);
+  const [error, setError] = useState('');
+  const [time, setTime] = useState(0);
+  const [mistakes, setMistakes] = useState(0);
+
+  const [scores, setScores] = useState([]);
+  const [geoData, setGeoData] = useState([]);
+  const [svgSize, setSvgSize] = useState({w:800, h:600});
+  const inputRef = useRef(null);
+
+  // Admin State
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const update = () => {
+      const wrap = document.getElementById('map-container');
+      if (wrap) setSvgSize({w: wrap.clientWidth, h: wrap.clientHeight || 400});
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [screen]);
+
+  useEffect(() => {
+    fetch('https://unpkg.com/world-atlas@2.0.2/countries-50m.json')
+      .then(r => r.json())
+      .then(data => {
+        const features = topojson.feature(data, data.objects.countries).features;
+        const euFeatures = features.filter(f => Object.keys(NAME_MAP).includes(f.properties.name));
+        setGeoData(euFeatures);
+      }).catch(err => console.error(err));
+  }, []);
+
+  useEffect(() => {
+    if (screen !== 'game' || !round?.startTime) return;
+    const interval = setInterval(() => {
+      setTime(Math.floor((Date.now() - round.startTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [screen, round]);
+
+  // Firebase: Daten laden
+  const loadLeaderboard = async () => {
+    try {
+      const snapshot = await db.collection("leaderboard")
+                               .orderBy("score", "desc")
+                               .limit(30)
+                               .get();
+      const lb = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setScores(lb);
+    } catch (e) { 
+      console.error("Fehler beim Laden:", e); 
+      setScores([]); 
+    }
+  };
+
+  // Firebase: Daten speichern
+  const saveScore = async (entry) => {
+    try {
+      await db.collection("leaderboard").add(entry);
+    } catch(e) { 
+      console.error("Fehler beim Speichern:", e); 
+    }
+  };
+
+  // Firebase: Daten löschen (Admin)
+  const deleteScore = async (id) => {
+    try {
+      await db.collection("leaderboard").doc(id).delete();
+      loadLeaderboard(); // Aktualisiert die Liste nach dem Löschen
+    } catch(e) {
+      console.error("Fehler beim Löschen:", e);
+    }
+  };
+
+  const startRound = () => {
+    const pair = ROUTES[Math.floor(Math.random() * ROUTES.length)];
+    const optimalCount = findShortestPathLength(pair[0], pair[1]);
+    
+    setRound({ from: pair[0], to: pair[1], optimal: optimalCount, startTime: Date.now() });
+    setGuessed([{ name: pair[0], order: 0 }]);
+    setInput('');
+    setAcList([]);
+    setError('');
+    setTime(0);
+    setMistakes(0);
+    setScreen('game');
+    setTimeout(() => inputRef.current?.focus(), 100);
+  };
+
+  const handleInput = (val) => {
+    setInput(val);
+    setAcIdx(-1);
+    setError('');
+    if (!val.trim()) { setAcList([]); return; }
+    const q = val.toLowerCase();
+    const matches = COUNTRY_NAMES.filter(n => n.toLowerCase().startsWith(q) && !guessed.find(g => g.name === n)).slice(0, 8);
+    setAcList(matches);
+  };
+
+  const handleUndo = () => {
+    if (guessed.length > 1) {
+      setGuessed(guessed.slice(0, -1));
+      setError('');
+      setTimeout(() => inputRef.current?.focus(), 10);
+    }
+  };
+
+  const submitCountry = async (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const match = COUNTRY_NAMES.find(n => n.toLowerCase() === trimmed.toLowerCase());
+    
+    if (!match) { 
+      setError(`"${trimmed}" existiert nicht im Spiel!`); 
+      setMistakes(m => m + 1);
+      return; 
+    }
+    if (guessed.find(g => g.name === match)) { 
+      setError(`${match} hast du bereits ausgewählt!`); 
+      setMistakes(m => m + 1);
+      return; 
+    }
+    
+    const isNeighborOfGuessed = guessed.some(g => {
+      const neighbors = BORDERS[g.name] || [];
+      return neighbors.includes(match);
+    });
+    
+    if (!isNeighborOfGuessed) {
+      setError(`FEHLER: ${match} grenzt an keines deiner bisherigen Länder!`);
+      setMistakes(m => m + 1);
+      return;
+    }
+
+    setError('');
+    const newGuessed = [...guessed, { name: match, order: guessed.length }];
+    setGuessed(newGuessed);
+    setInput('');
+    setAcList([]);
+    setAcIdx(-1);
+
+    if (match === round.to) {
+      const count = newGuessed.length;
+      const score = calcScore(count, round.optimal, time, mistakes);
+      const entry = {
+        nickname, klasse, score,
+        route: `${round.from} → ${round.to}`,
+        count, optimal: round.optimal, time, mistakes,
+        date: new Date().toISOString(),
+      };
+      
+      // Speichere in Firebase
+      await saveScore(entry);
+      
+      setTimeout(() => {
+        setScreen('result');
+        setRound(r => ({...r, finalScore: score, finalCount: count, entry}));
+      }, 800);
+    } else {
+      setTimeout(() => inputRef.current?.focus(), 10);
+    }
+  };
+
+  const handleKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setAcIdx(i => Math.min(i+1, acList.length-1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setAcIdx(i => Math.max(i-1, -1)); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (acIdx >= 0 && acList[acIdx]) submitCountry(acList[acIdx]);
+      else submitCountry(input);
+    }
+    else if (e.key === 'Escape') setAcList([]);
+  };
+
+  const mapPath = useMemo(() => {
+    const projection = d3.geoMercator().center([15, 53]).scale(svgSize.w * 0.9).translate([svgSize.w / 2, svgSize.h / 1.6]);
+    return d3.geoPath().projection(projection);
+  }, [svgSize]);
+
+  const renderMap = () => {
+    if (geoData.length === 0) return <div style={{padding:'40px', textAlign:'center', color:'#6366f1'}}>Karte wird geladen...</div>;
+    const guessedNames = guessed.map(g => g.name);
+
+    return (
+      <svg viewBox={`0 0 ${svgSize.w} ${svgSize.h}`} width="100%" height="100%" style={{background:'#f1f5f9'}}>
+        <g>
+          {geoData.map((feature, i) => {
+            const gerName = NAME_MAP[feature.properties.name];
+            if (!gerName) return null;
+
+            const isGuessed = guessedNames.includes(gerName);
+            const isFrom = gerName === round?.from;
+            const isTo = gerName === round?.to;
+            
+            let fill = '#ffffff', stroke = '#cbd5e1', sw = 1;
+            
+            if (isFrom) { fill = '#10b981'; stroke = '#059669'; sw = 1.5; } 
+            else if (isTo && isGuessed) { fill = '#10b981'; stroke = '#059669'; sw = 1.5; } 
+            else if (isTo) { fill = '#f43f5e'; stroke = '#e11d48'; sw = 1.5; } 
+            else if (isGuessed) { fill = '#818cf8'; stroke = '#4f46e5'; sw = 1; } 
+
+            return (
+              <path key={i} d={mapPath(feature)} fill={fill} stroke={stroke} strokeWidth={sw} className="map-country" />
+            );
+          })}
+        </g>
+        {guessed.map((g, i) => {
+          const engName = Object.keys(NAME_MAP).find(k => NAME_MAP[k] === g.name);
+          const feature = geoData.find(f => f.properties.name === engName);
+          if (!feature) return null;
+          const centroid = mapPath.centroid(feature);
+          if (isNaN(centroid[0])) return null;
+          return (
+            <text key={`txt-${i}`} x={centroid[0]} y={centroid[1]} textAnchor="middle" dominantBaseline="middle" fill="#ffffff" fontSize="12" fontFamily="'Roboto Mono', monospace" fontWeight="700" style={{ pointerEvents:'none', textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>
+              {i + 1}
+            </text>
+          );
+        })}
+      </svg>
+    );
+  };
+
+  // ═══════════════════════════════════════════════════════════
+  // RENDER HAUPT-APP MIT ADMIN-LOGIN
+  // ═══════════════════════════════════════════════════════════
+  return (
+    <div style={{position: 'relative', minHeight: '100vh'}}>
+      {screen === 'onboard' && <Onboard nickname={nickname} setNickname={setNickname} klasse={klasse} setKlasse={setKlasse} onStart={startRound} onLeaderboard={() => { loadLeaderboard(); setScreen('leaderboard'); }}/>}
+      
+      {screen === 'leaderboard' && <Leaderboard scores={scores} onBack={() => setScreen('onboard')} onPlay={startRound} isAdmin={isAdmin} onDelete={deleteScore} />}
+      
+      {screen === 'result' && <Result round={round} time={time} mistakes={mistakes} renderMap={renderMap} onNewRound={startRound} onLeaderboard={() => { loadLeaderboard(); setScreen('leaderboard'); }}/>}
+
+      {screen === 'game' && (
+        <div style={{display:'flex',flexDirection:'column',height:'100vh',padding:'16px',gap:'16px',maxWidth:'900px',margin:'0 auto'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div style={{fontSize:'1.4rem',fontWeight:'700',color:'#1e293b', letterSpacing:'-0.5px'}}>
+              <span style={{color:'#6366f1'}}>Geo</span>-Line <span style={{fontWeight:'400', color:'#64748b'}}>Europa</span>
+            </div>
+            <div style={{display:'flex',gap:'16px',alignItems:'center'}}>
+              <div style={{fontSize:'16px',color:'#64748b',fontWeight:'600',fontFamily:"'Roboto Mono', monospace"}}>⏱ {formatTime(time)}</div>
+              <Btn outlined onClick={() => { loadLeaderboard(); setScreen('leaderboard'); }}>Rangliste</Btn>
+            </div>
+          </div>
+
+          <div className="material-card" style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'16px 24px'}}>
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:'10px', fontWeight:'700', color:'#10b981', letterSpacing:'1px', marginBottom:'4px'}}>START</div>
+              <div style={{fontSize:'1.2rem', fontWeight:'600'}}>{round.from}</div>
+            </div>
+            <div style={{color:'#cbd5e1', fontSize:'1.5rem'}}>➔</div>
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:'10px', fontWeight:'700', color:'#f43f5e', letterSpacing:'1px', marginBottom:'4px'}}>ZIEL</div>
+              <div style={{fontSize:'1.2rem', fontWeight:'600'}}>{round.to}</div>
+            </div>
+          </div>
+
+          <div className="material-card" id="map-container" style={{flex:1, overflow:'hidden', minHeight:'200px'}}>
+            {renderMap()}
+          </div>
+
+          <div style={{position:'relative'}} className="input-focus">
+            <div className="material-card" style={{display:'flex', padding:'8px', gap:'8px', borderRadius:'100px', alignItems:'center'}}>
+              <input
+                ref={inputRef} value={input} onChange={e => handleInput(e.target.value)} onKeyDown={handleKey}
+                placeholder={`Nächstes angrenzendes Land...`}
+                style={{ flex:1, border:'none', background:'transparent', fontFamily:'Inter', fontSize:'16px', padding:'8px 16px', outline:'none', color:'#1e293b' }}
+              />
+              <Btn onClick={() => submitCountry(acIdx>=0&&acList[acIdx]?acList[acIdx]:input)} style={{borderRadius:'100px', padding:'10px 24px'}}>Bestätigen</Btn>
+              <button onClick={handleUndo} title="Letztes Land entfernen" style={{ background:'transparent', border:'none', color:'#94a3b8', fontSize:'20px', cursor:'pointer', padding:'0 16px', opacity: guessed.length > 1 ? 1 : 0.3 }}>
+                ↩
+              </button>
+            </div>
+            
+            {acList.length > 0 && (
+              <div className="material-card" style={{ position:'absolute', bottom:'calc(100% + 8px)', left:'0', right:'120px', zIndex:100, overflow:'hidden', padding:'8px 0' }}>
+                {acList.map((n,i) => (
+                  <div key={n} onMouseDown={() => submitCountry(n)} style={{ padding:'10px 20px', cursor:'pointer', fontSize:'15px', background: i===acIdx ? '#f8fafc' : 'transparent', color: '#1e293b' }}>{n}</div>
+                ))}
+              </div>
+            )}
+            {error && <div style={{color:'#ef4444',fontSize:'13px',marginTop:'8px',fontWeight:'600', paddingLeft:'16px'}}>{error}</div>}
+          </div>
+          
+          <div className="material-card" style={{ padding:'16px', maxHeight:'140px', overflowY:'auto' }}>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:'12px'}}>
+              <div style={{fontSize:'12px',color:'#64748b',fontWeight:'600'}}>DEIN NETZWERK</div>
+              <div style={{fontSize:'12px',color:'#ef4444',fontWeight:'600'}}>FEHLER: {mistakes}</div>
+            </div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}>
+              {guessed.map((g,i) => (
+                <span key={g.name} style={{ background: i===0?'#d1fae5':'#e0e7ff', border: `1px solid ${i===0?'#6ee7b7':'#c7d2fe'}`, borderRadius:'100px', padding:'6px 12px', fontSize:'13px', color: i===0?'#047857':'#4338ca', fontWeight:'500' }}>
+                  {g.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Die kleine Admin-Login Komponente */}
+      <AdminToggle isAdmin={isAdmin} setIsAdmin={setIsAdmin} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// UNTER-KOMPONENTEN
+// ═══════════════════════════════════════════════════════════
+
+function AdminToggle({isAdmin, setIsAdmin}) {
+  const [open, setOpen] = useState(false);
+  const [pass, setPass] = useState('');
+
+  if (isAdmin) {
+    return (
+      <div style={{position:'fixed', bottom:'16px', right:'16px', color:'#ef4444', fontSize:'12px', fontWeight:'700', background:'rgba(255,255,255,0.8)', padding:'4px 8px', borderRadius:'8px'}}>
+        Admin aktiv <button onClick={()=>setIsAdmin(false)} style={{background:'none',border:'none',cursor:'pointer',marginLeft:'4px'}}>✕</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{position:'fixed', bottom:'16px', right:'16px', zIndex: 999}}>
+      {!open && <button onClick={() => setOpen(true)} style={{background:'transparent', border:'none', cursor:'pointer', fontSize:'20px', opacity:0.2, transition:'opacity 0.2s'}} onMouseOver={e=>e.target.style.opacity=1} onMouseOut={e=>e.target.style.opacity=0.2}>🔒</button>}
+      {open && (
+        <div className="material-card" style={{padding:'8px', display:'flex', gap:'8px', background:'#fff', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}}>
+          <input 
+            type="password" 
+            value={pass} 
+            onChange={e => setPass(e.target.value)} 
+            placeholder="Passwort" 
+            style={{width:'100px', fontSize:'14px', padding:'4px 8px', border:'1px solid #e2e8f0', borderRadius:'4px', outline:'none'}}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                if(pass === 'ahmedpass') { setIsAdmin(true); setOpen(false); setPass(''); } else { alert('Falsches Passwort'); }
+              }
+            }}
+          />
+          <Btn style={{padding:'4px 12px', fontSize:'12px'}} onClick={() => {
+            if (pass === 'ahmedpass') {
+              setIsAdmin(true);
+              setOpen(false);
+              setPass('');
+            } else {
+              alert('Falsches Passwort');
+            }
+          }}>OK</Btn>
+          <button onClick={() => setOpen(false)} style={{background:'none', border:'none', cursor:'pointer'}}>✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Onboard({nickname,setNickname,klasse,setKlasse,onStart,onLeaderboard}) {
+  const [err,setErr] = useState('');
+  const go = () => { if (!nickname.trim()) { setErr('Bitte gib einen Nickname ein!'); return; } onStart(); };
+  return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+      <div style={{width:'100%',maxWidth:'440px'}}>
+        <div style={{textAlign:'center',marginBottom:'32px'}}>
+          <div style={{fontSize:'3.5rem',fontWeight:'800',letterSpacing:'-2px',lineHeight:1}}>
+            <span style={{color:'#6366f1'}}>Geo</span><span style={{color:'#1e293b'}}>-Line</span>
+          </div>
+          <div style={{fontSize:'14px',fontWeight:'500',color:'#64748b',marginTop:'8px'}}>Europa Edition</div>
+        </div>
+        
+        <div className="material-card" style={{padding:'32px',display:'flex',flexDirection:'column',gap:'20px'}}>
+          <div>
+            <div style={{fontSize:'12px',fontWeight:'600',color:'#64748b',marginBottom:'8px'}}>DEIN NICKNAME</div>
+            <input value={nickname} onChange={e => setNickname(e.target.value)} placeholder="z.B. MapMaster99" style={{ width:'100%',border:'1px solid #e2e8f0', borderRadius:'8px',fontSize:'16px',padding:'12px 16px',outline:'none', fontFamily:'Inter', color:'#1e293b' }} onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e2e8f0'}/>
+          </div>
+          <div>
+            <div style={{fontSize:'12px',fontWeight:'600',color:'#64748b',marginBottom:'8px'}}>KLASSE (optional)</div>
+            <input value={klasse} onChange={e => setKlasse(e.target.value)} placeholder="z.B. 9b" style={{ width:'100%',border:'1px solid #e2e8f0', borderRadius:'8px',fontSize:'16px',padding:'12px 16px',outline:'none', fontFamily:'Inter', color:'#1e293b' }} onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e2e8f0'}/>
+          </div>
+          {err && <div style={{color:'#ef4444',fontSize:'13px',fontWeight:'600'}}>{err}</div>}
+          <Btn onClick={go} style={{width:'100%', padding:'14px', fontSize:'16px', marginTop:'8px'}}>Spiel Starten</Btn>
+        </div>
+
+        <div style={{marginTop:'24px', padding:'0 16px'}}>
+          <div style={{fontSize:'12px',fontWeight:'700',color:'#64748b',marginBottom:'12px', letterSpacing:'1px'}}>SO FUNKTIONIERT'S</div>
+          {[['🗺️','Verbinde Land A mit Land B.'],['🧭','Jedes neue Land muss an eines deiner bisherigen grenzen.'],['⏱️','Sei schnell und fehlerfrei für bis zu 1000 Punkte!']].map(([icon,text]) => (
+            <div key={text} style={{display:'flex',gap:'12px',marginBottom:'10px',fontSize:'14px',color:'#334155'}}><span>{icon}</span><span style={{lineHeight:'1.4'}}>{text}</span></div>
+          ))}
+        </div>
+        
+        <div style={{textAlign:'center', marginTop:'32px'}}>
+          <Btn outlined onClick={onLeaderboard} style={{width:'100%', background:'#fff'}}>🏆 Globales Leaderboard</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Result({round,time,mistakes,renderMap,onNewRound,onLeaderboard}) {
+  return (
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'20px',gap:'16px'}}>
+      <div style={{width:'100%',maxWidth:'600px',display:'flex',flexDirection:'column',gap:'16px'}}>
+        
+        <div className="material-card" style={{padding:'32px', textAlign:'center'}}>
+          <div style={{fontSize:'1.5rem',fontWeight:'700',color:'#1e293b'}}>Ziel erreicht!</div>
+          <div style={{color:'#64748b', marginTop:'8px', marginBottom:'24px'}}>{round.from} ➔ {round.to}</div>
+          
+          <div style={{fontSize:'4rem',fontWeight:'800',color:'#6366f1', lineHeight:'1'}}>{round.finalScore}</div>
+          <div style={{fontSize:'12px',fontWeight:'700',color:'#64748b', letterSpacing:'1px', marginTop:'8px'}}>ENDSCORE</div>
+        </div>
+
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px'}}>
+          <StatBox label="ZEIT" value={formatTime(time)} />
+          <StatBox label="FEHLER" value={mistakes} color="#ef4444" />
+          <StatBox label="DEIN WEG" value={round.finalCount} />
+          <StatBox label="OPTIMAL" value={round.optimal} color="#10b981" />
+        </div>
+
+        <div className="material-card" id="map-container" style={{overflow:'hidden',height:'240px'}}>
+          {renderMap()}
+        </div>
+
+        <div style={{display:'flex',gap:'12px', marginTop:'8px'}}>
+          <Btn onClick={onNewRound} style={{flex:1, padding:'14px', fontSize:'16px'}}>Erneut spielen</Btn>
+          <Btn outlined onClick={onLeaderboard} style={{flex:1, padding:'14px', fontSize:'16px', background:'#fff'}}>Rangliste</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatBox({label, value, color='#1e293b'}) {
+  return (
+    <div className="material-card" style={{padding:'16px 8px',textAlign:'center'}}>
+      <div style={{fontSize:'1.4rem',fontWeight:'700',color:color, fontFamily:"'Roboto Mono', monospace"}}>{value}</div>
+      <div style={{fontSize:'10px',fontWeight:'700',color:'#64748b', letterSpacing:'1px', marginTop:'4px'}}>{label}</div>
+    </div>
+  )
+}
+
+function Leaderboard({scores,onBack,onPlay,isAdmin,onDelete}) {
+  return (
+    <div style={{minHeight:'100vh',padding:'24px',maxWidth:'700px',margin:'0 auto'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'16px',marginBottom:'24px'}}>
+        <button onClick={onBack} style={{background:'none',border:'none',color:'#64748b',fontSize:'24px',cursor:'pointer'}}>←</button>
+        <div style={{fontSize:'1.8rem',fontWeight:'700',color:'#1e293b'}}>Globale Rangliste</div>
+      </div>
+      
+      <div className="material-card" style={{overflow:'hidden'}}>
+        {scores.length === 0 ? (
+          <div style={{textAlign:'center',color:'#64748b',padding:'40px',fontSize:'15px'}}>Noch keine Einträge. Spiel eine Runde!</div>
+        ) : (
+          <div style={{display:'flex',flexDirection:'column'}}>
+            {scores.map((s,i) => (
+              <div key={s.id || i} style={{ display:'grid',gridTemplateColumns:`40px 1fr 80px 80px ${isAdmin ? '40px' : ''}`,gap:'12px', padding:'16px', borderBottom: i<scores.length-1 ? '1px solid #f1f5f9' : 'none', alignItems:'center', background: i===0?'#e0e7ff':'transparent' }}>
+                <span style={{fontSize:'1.2rem',fontWeight:'700',color:i===0?'#f59e0b':i===1?'#94a3b8':i===2?'#b45309':'#cbd5e1', textAlign:'center'}}>{i===0?'1':i===1?'2':i===2?'3':i+1}</span>
+                <div style={{overflow:'hidden'}}>
+                  <div style={{color:'#1e293b',fontSize:'15px',fontWeight:'600',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                    {s.nickname} {s.klasse && <span style={{fontSize:'11px', color:'#64748b', fontWeight:'normal'}}>({s.klasse})</span>}
+                  </div>
+                  <div style={{color:'#64748b',fontSize:'12px',marginTop:'2px'}}>{s.count} Länder • {formatTime(s.time)}</div>
+                </div>
+                <span style={{fontSize:'1.2rem',fontWeight:'700',color:'#6366f1', fontFamily:"'Roboto Mono', monospace", textAlign:'right'}}>{s.score}</span>
+                <span style={{fontSize:'12px',color:s.mistakes>0?'#ef4444':'#10b981',textAlign:'right',fontWeight:'600'}}>{s.mistakes > 0 ? `${s.mistakes} Fehler` : 'Perfekt'}</span>
+                
+                {/* Löschen Button für Admins */}
+                {isAdmin && (
+                  <button onClick={() => { if(window.confirm('Eintrag wirklich löschen?')) onDelete(s.id); }} style={{background:'none', border:'none', cursor:'pointer', fontSize:'16px'}} title="Löschen">🗑️</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{textAlign:'center', marginTop:'32px'}}>
+        <Btn onClick={onPlay} style={{padding:'14px 32px', fontSize:'16px'}}>Jetzt Spielen</Btn>
+      </div>
+    </div>
+  );
+}
+
+function Btn({children,onClick,style={},outlined}) {
+  return (
+    <button onClick={onClick} style={{ background: outlined ? 'transparent' : '#6366f1', border: outlined ? '1px solid #e2e8f0' : 'none', borderRadius:'8px',color: outlined ? '#6366f1' : '#ffffff', fontFamily:'Inter', fontWeight:'600', padding: '10px 20px', cursor:'pointer', transition:'all 0.2s', ...style }} onMouseOver={e => {if(outlined) e.target.style.background='#f8fafc'; else e.target.style.background='#4f46e5'}} onMouseOut={e => {if(outlined) e.target.style.background='transparent'; else e.target.style.background='#6366f1'}}>{children}</button>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+</body>
+</html>
   .input-focus:focus-within {
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
   }
